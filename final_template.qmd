@@ -2,7 +2,7 @@
 title: "Final"
 output: html_document
 author: "Your Name"
-date: "2025-12-06"
+date: "2025-12-08"
 ---
 
 # Introduction
@@ -81,7 +81,7 @@ Eviction filing data from 2021–2024 were collected and aggregated to the tract
 Quarterly lags were computed to represent short-term momentum (lag 1) and annual seasonal effects (lag 2 / lag 4).
 
 ```{r}
-evictions_raw <- read.csv("data/philadelphia_weekly_2020_2021.csv")
+evictions_raw <- read.csv("/Users/cathy/GitHub/ppa_final/data/philadelphia_weekly_2020_2021.csv")
 
 evictions_quarterly <- evictions_raw %>%
   mutate(
@@ -239,7 +239,7 @@ write.csv(acs_final, "acs_final.csv", row.names = FALSE)
 
 ### Property Data
 ```{r}
-opa <- read_csv("data/opa_properties_public.csv")
+opa <- read_csv("/Users/cathy/GitHub/ppa_final/data/opa_properties_public.csv")
 ```
 ```{r}
 # spatial join
@@ -303,7 +303,7 @@ These variables quantify environmental exposure that may influence eviction risk
 ```{r}
 tract_centroids <- st_centroid(philly_tracts)
 
-transit_raw <- read_csv("data/Transit_Stops.csv")
+transit_raw <- read_csv("/Users/cathy/GitHub/ppa_final/data/Transit_Stops.csv")
 
 transit_sf <- transit_raw %>%
   st_as_sf(coords = c("Lon", "Lat"), crs = 4326)
@@ -318,7 +318,7 @@ transit_summary <- station_join %>%
   summarise(n_stations_800m = n())
 ```
 ```{r}
-crime <- read_csv("data/incidents_part1_part2.csv")
+crime <- read_csv("/Users/cathy/GitHub/ppa_final/data/incidents_part1_part2.csv")
 
 crime_sf <- crime %>%
   filter(!is.na(lat), !is.na(lng)) %>%
