@@ -1,0 +1,10 @@
+project:
+  type: default
+
+format:
+  revealjs:
+    theme: simple
+    slide-number: true
+    toc: true
+
+title: "My Quarto Slides Project"

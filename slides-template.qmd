@@ -1,0 +1,66 @@
+---
+title: "My Presentation"
+subtitle: "Quarto Reveal.js Template"
+author: "Your Name"
+format:
+  revealjs:
+    theme: simple
+    transition: slide
+    slide-number: true
+    toc: true
+---
+
+## Slide 1 — Introduction
+
+Welcome to your Quarto presentation!
+
+---
+
+## Slide 2 — Bullet Points
+
+- Point one  
+- Point two  
+- Point three
+
+---
+
+## Slide 3 — Two Columns
+
+:::: columns
+::: column
+### Left Column
+- Text
+- Image
+:::
+
+::: column
+### Right Column
+Here is more content.
+:::
+::::
+
+---
+
+## Slide 4 — Code Example
+
+```r
+plot(cars)
+```
+
+---
+
+## Slide 5 — Math Example
+
+Inline math: $y = mx + b$
+
+Block math:
+
+$$
+E = mc^2
+$$
+
+---
+
+## Slide 6 — Thank You
+
+**Any questions?**
