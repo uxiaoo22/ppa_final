@@ -1,7 +1,7 @@
 ---
-title: "My Presentation"
+title: "Final one"
 subtitle: "Quarto Reveal.js Template"
-author: "Your Name"
+author: "Qianmu Zheng,Alex Stauffer,Xiao Yu"
 format:
   revealjs:
     theme: simple
@@ -12,7 +12,7 @@ format:
 
 ## Slide 1 — Introduction
 
-Welcome to your Quarto presentation!
+Welcome to your Quarto presentation!final
 
 ---
 

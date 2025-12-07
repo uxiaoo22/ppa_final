@@ -110,6 +110,11 @@ We incorporate the following structural characteristics derived from ACS:
 - property_age
 
 ```{r}
+detach("package:MASS", unload = TRUE)
+library(dplyr)
+
+# Then try your select again
+
 acs_vars <- c(
   # Demographics
   total_pop          = "B01001_001",
@@ -457,7 +462,7 @@ This section presents exploratory data analysis, focusing on spatial patterns an
 
 ```{r}
 philly_tracts_2 <- st_read(
-  "D:/Desktop/musa/5080_policy/final/copy_github/data/tl_2020_42_tract/tl_2020_42_tract.shp"
+  "/Users/cathy/GitHub/ppa_final/copy_github2/data/tl_2020_42_tract/tl_2020_42_tract.shp"
 )
 
 
@@ -720,6 +725,20 @@ patchwork::wrap_plots(plot_list, ncol = 3)
 **All structural and property predictors exhibit strong spatial autocorrelation.** This confirms that spatial dependence is inherent across most socioeconomic conditions, reinforcing the need for spatially informed modeling strategies.
 
 ```{r}
+# Define the structural variables to test
+vars_struct <- c(
+  "pct_black",
+  "median_income",
+  "pct_renter",
+  "pct_rent_burdened",
+  "median_rent",
+  "property_age",
+  "median_market_value",
+  "pct_low_value",
+  "pct_tax_delinquent"
+)
+
+# Then run your existing Moran's I code
 moran_results <- lapply(vars_struct, function(v) {
   test <- moran.test(df_sf_2[[v]], lw)
   
@@ -734,6 +753,8 @@ moran_results <- lapply(vars_struct, function(v) {
 
 moran_df <- do.call(rbind, moran_results)
 moran_df
+
+
 ```
 
 ## spatial data 
@@ -844,6 +865,7 @@ Correlation tests show that most predictors are only weakly correlated.
 However, some ACS variables exhibit moderate correlation (Pearson r = 0.6–0.7), which is common in socioeconomic datasets.
 
 ```{r}
+# Define variables for correlation analysis
 vars_to_corr <- c(
   "evictions_lag1Q",
   "pct_black",
@@ -859,6 +881,15 @@ vars_to_corr <- c(
   "crime_rate"
 )
 
+# Calculate correlation matrix
+corr_matrix <- cor(df[, vars_to_corr], use = "complete.obs")
+
+# Convert to long format for ggplot
+library(reshape2)
+corr_df <- melt(corr_matrix)
+names(corr_df) <- c("var1", "var2", "corr")
+
+# Plot the heatmap
 ggplot(corr_df, aes(x = var1, y = var2, fill = corr)) +
   geom_tile(color = "white") +
   geom_text(
@@ -1248,6 +1279,29 @@ Poisson-based models (Models 3 and 5) perform more consistently across time by a
 Therefore, despite Model 2’s raw accuracy, Model 6 is the chosen final model because it provides both solid predictive ability and the correct spatiotemporal data-generating structure.
 
 ### Total RMSE
+```{r}
+library(purrr)
+
+# --- Performance function  ---
+perf <- function(actual, predicted) {
+  list(
+    MAE  = mean(abs(actual - predicted)),
+    RMSE = sqrt(mean((actual - predicted)^2)),
+    R2   = 1 - sum((actual - predicted)^2) / sum((actual - mean(actual))^2)
+  )
+}
+
+# --- Define quarters for cross-validation ---
+quarters <- c("2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4")
+
+# --- Define model list and names ---
+model_list  <- list(model1_ols, model2_lag_ols, model3_nb,
+                    model5_nb, model6_nb)
+
+model_names <- c("Model1_OLS", "Model2_TimeLag_OLS", "Model3_NB",
+                 "Model5_ST_NB", "Model6_Final")
+```
+
 
 ```{r}
 cv_results_overall <- map2_dfr(
