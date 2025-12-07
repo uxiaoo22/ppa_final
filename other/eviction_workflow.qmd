@@ -1,0 +1,449 @@
+---
+title: "Philadelphia Eviction Prediction: Data Collection and Processing Workflow"
+author: "Your Name"
+date: "`r format(Sys.Date(), '%Y-%m-%d')`"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+execute:
+  echo: true
+  warning: true
+  message: true
+editor: visual
+---
+
+```{r setup, include=FALSE}
+# Core libraries (install them manually beforehand if needed)
+# install.packages(c("tidycensus", "sf", "dplyr", "readr", "zoo", "lubridate", "ggplot2"))
+
+library(tidycensus)
+library(sf)
+library(dplyr)
+library(readr)
+library(zoo)
+library(lubridate)
+library(ggplot2)
+
+options(scipen = 999, dplyr.summarise.inform = FALSE)
+```
+
+# 1. Research Question and Overview
+
+## 1.1 Core Research Question
+
+**Can we predict eviction filing counts at the census-tract level 1–3 months in advance, enabling the City of Philadelphia to proactively deploy rental assistance, legal aid resources, and community outreach?**
+
+-   **Spatial Unit:** Census tract
+
+-   **Temporal Unit:** Quarterly
+    政府通常按季度部署资源（法律援助、租金补助）
+
+    驱逐申请（filings）逐月波动太大，季度更稳
+
+-   **Outcome:** Number of eviction filings in next 1–3 months
+
+驱逐申请记录 / 驱逐立案记录
+
+Eviction filing = 驱逐申请记录 / 驱逐立案记录
+
+房东正式向法院提交一份驱逐申请，把租客“告上法庭”。
+
+当房东要赶走租客（通常因欠租），他们必须先：
+
+向法院提交驱逐文件（filing）
+
+等待法院回应
+
+法庭审理
+
+最终法院可能下达驱逐令（eviction judgment）
+
+Filing = 整个驱逐流程的第一步（非常重要）
+
+-   **Model:**
+
+-   Poisson /
+    用于预测 **计数数据**（count data）
+
+    比如：
+
+    某 tract 下个月有多少起驱逐申请？
+
+    一周内有多少起交通事故？
+
+    **特点：**
+
+    假设“均值 ≈ 方差”（Mean ≈ Variance）
+
+    适用于事件发生频率低、离散的数据（如 0,1,2,3,...）
+
+-   Negative Binomial (count outcome)
+    也是用于 **count data**，但更灵活
+
+    **为什么用它？**
+
+    当数据“过度离散”（overdispersion）
+
+    即 **方差 \> 均值**（驱逐往往是这种情况）
+
+    **一句话：**
+
+    如果 Poisson 回归觉得数据太“乱”，Negative Binomial 就能处理更好。
+
+    在城市社会数据中：
+
+    犯罪/311投诉/交通事故/驱逐 filings
+
+    这些都倾向用 Negative Binomial
+
+-   logistic if we binarize high-risk vs low-risk tracts
+
+    用于预测 **二元结果（0/1）**
+
+    示例：
+
+    某 tract 是否属于 “high-risk 驱逐区域”（是/否）？
+
+    某房产明年是否会拖欠税款（是/否）？
+
+    **逻辑回归 ≠ 计数模型**\
+    适合转换为：
+
+    高风险 vs 低风险
+
+    驱逐是否会大幅上升（Yes/No）
+
+## 1.2 Why Predict Evictions (as the Outcome)?
+
+-   Evictions are a direct signal of housing instability and potential downstream harms (homelessness, school disruption, neighborhood turnover).
+-   Predicting *where* filings are likely to spike allows earlier interventions:
+    -   Targeted rental assistance
+    -   Legal aid deployment
+    -   Community outreach and mediation
+
+In this project, we treat **eviction filings as the outcome**, not just as a predictor for something else.
+
+------------------------------------------------------------------------
+
+# 2. Workflow Overview
+
+This QMD documents a reproducible workflow to build a tract–month modeling dataset:
+
+1.  Download Philadelphia census tract boundaries\
+2.  Collect ACS socioeconomic and housing indicators\
+3.  Collect and aggregate OPA property assessment data (via CSV API, no RSocrata)\
+4.  Construct spatial features (distance to courts; optional transit and crime features)\
+5.  Process eviction records into tract–month format\
+6.  Create lagged eviction variables\
+7.  Merge all data into a final modeling dataset
+
+------------------------------------------------------------------------
+
+# 3. Step 1: Census Tract Boundaries (Spatial Base)
+
+```{r census-tracts}
+# NOTE: Make sure you have set your Census API key once using:
+# tidycensus::census_api_key("YOUR_KEY_HERE", install = TRUE)
+
+philly_tracts <- get_acs(
+  geography = "tract",
+  state = "PA",
+  county = "Philadelphia",
+  variables = "B01001_001",  # total population, used just to get geometry
+  year = 2022,
+  geometry = TRUE
+)
+
+philly_tracts_sf <- philly_tracts %>% 
+  select(GEOID, geometry)
+
+philly_tracts_sf
+```
+
+You may optionally save this as a spatial file for reuse:
+
+```{r save-tracts, eval=FALSE}
+st_write(philly_tracts_sf, "data/philly_tracts.gpkg", delete_dsn = TRUE)
+```
+
+------------------------------------------------------------------------
+
+# 4. Step 2: ACS Data (Socioeconomic & Housing Indicators)
+
+## 4.1 Define ACS Variables
+
+```{r acs-data}
+acs_vars <- c(
+  # Demographics
+  total_pop          = "B01001_001",
+  white_pop          = "B02001_002",
+  black_pop          = "B02001_003",
+  asian_pop          = "B02001_005",
+  hispanic_pop       = "B03003_003",
+
+  # Economic indicators
+  median_income      = "B19013_001",
+  poverty_total      = "B17001_001",
+  poverty_below      = "B17001_002",
+  unemployment_total = "B23025_002",  # in labor force
+  unemployment_unemployed = "B23025_005",
+
+  # Housing and tenure
+  total_housing_units = "B25001_001",
+  renter_occupied     = "B25003_003",
+  median_rent         = "B25064_001",
+  median_home_value   = "B25077_001",
+
+  # Rent burden distribution
+  rent_30_to_35_pct   = "B25070_007",
+  rent_35_to_40_pct   = "B25070_008",
+  rent_40_to_50_pct   = "B25070_009",
+  rent_50_plus_pct    = "B25070_010",
+
+  # Housing age and vacancy
+  median_year_built   = "B25037_001",
+  vacant_units        = "B25002_003"
+)
+
+acs_raw <- get_acs(
+  geography = "tract",
+  state = "PA",
+  county = "Philadelphia",
+  variables = acs_vars,
+  year = 2022,
+  output = "wide",
+  geometry = FALSE
+)
+
+acs_final <- acs_raw %>%
+  mutate(
+    # Race shares
+    pct_white     = white_popE     / total_popE * 100,
+    pct_black     = black_popE     / total_popE * 100,
+    pct_hispanic  = hispanic_popE  / total_popE * 100,
+    pct_asian     = asian_popE     / total_popE * 100,
+
+    # Poverty & unemployment
+    poverty_rate      = poverty_belowE / poverty_totalE * 100,
+    unemployment_rate = unemployment_unemployedE / unemployment_totalE * 100,
+
+    # Tenure & rent burden
+    pct_renter        = renter_occupiedE / total_housing_unitsE * 100,
+    rent_burdened     = rent_30_to_35_pctE + rent_35_to_40_pctE +
+                        rent_40_to_50_pctE + rent_50_plus_pctE,
+    pct_rent_burdened = rent_burdened / renter_occupiedE * 100,
+    pct_severe_burden = rent_50_plus_pctE / renter_occupiedE * 100,
+
+    # Housing age
+    property_age      = 2024 - median_year_builtE
+  ) %>%
+  select(
+    GEOID,
+    total_popE,
+    pct_white, pct_black, pct_hispanic, pct_asian,
+    poverty_rate, unemployment_rate,
+    median_incomeE, pct_renter,
+    pct_rent_burdened, pct_severe_burden,
+    median_rentE, median_home_valueE,
+    property_age, vacant_unitsE
+  ) %>%
+  rename(
+    total_pop        = total_popE,
+    median_income    = median_incomeE,
+    median_rent      = median_rentE,
+    median_home_value = median_home_valueE,
+    vacant_units     = vacant_unitsE
+  )
+
+head(acs_final)
+```
+
+You can optionally save this intermediate dataset:
+
+```{r save-acs, eval=FALSE}
+write_csv(acs_final, "data/acs_tract_data.csv")
+```
+
+------------------------------------------------------------------------
+
+# 5. Step 3: OPA Property Assessment Data (No RSocrata)
+
+We use the Carto SQL API exposed by the City of Philadelphia and read it as CSV.
+
+```{r opa-data, eval=FALSE}
+# NOTE: This URL may need to be updated if the dataset name or schema changes.
+opa_url <- "https://phl.carto.com/api/v2/sql?q=SELECT%20*%20FROM%20opa_properties_public&format=csv"
+
+opa_raw <- read.csv(opa_url)
+
+# Inspect columns to confirm field names
+names(opa_raw)[1:20]
+
+# Summarize to census tract level
+property_summary <- opa_raw %>%
+  filter(!is.na(census_tract)) %>%
+  group_by(census_tract) %>%
+  summarise(
+    n_properties        = n(),
+    avg_market_value    = mean(market_value, na.rm = TRUE),
+    median_market_value = median(market_value, na.rm = TRUE),
+    pct_residential     = mean(category_code_description == "Residential", na.rm = TRUE) * 100
+  ) %>%
+  rename(GEOID = census_tract)
+
+head(property_summary)
+
+# Optional: save
+# write_csv(property_summary, "data/property_summary_by_tract.csv")
+```
+
+> If column names differ (e.g., `market_value` or `category_code_description`), adjust them based on `names(opa_raw)`.
+
+------------------------------------------------------------------------
+
+# 6. Step 4: Spatial Features
+
+## 6.1 Distance to Courts
+
+We construct a simple feature: distance from each tract centroid to the nearest court.
+
+```{r courts-distance}
+courts <- tibble::tribble(
+  ~name,             ~lat,     ~lon,
+  "Municipal Court", 39.9496, -75.1617,
+  "Civil Court",     39.9526, -75.1652
+  # Add additional court locations as needed
+)
+
+courts_sf <- st_as_sf(courts, coords = c("lon", "lat"), crs = 4326)
+
+tracts_proj <- st_transform(philly_tracts_sf, 26918)
+courts_proj <- st_transform(courts_sf, 26918)
+
+tract_centroids <- st_centroid(tracts_proj)
+
+dist_matrix <- st_distance(tract_centroids, courts_proj)
+tract_centroids$dist_to_court_km <- apply(dist_matrix, 1, min) / 1000
+
+dist_to_court <- tract_centroids %>%
+  st_drop_geometry() %>%
+  select(GEOID, dist_to_court_km)
+
+head(dist_to_court)
+```
+
+## 6.2 Optional: Transit Accessibility and Crime
+
+To keep this workflow robust and focused, we do **not** implement transit and crime pulls here, but they can be added later as:
+
+-   Distance to nearest transit stop (using a transit stops layer and `st_distance`)\
+-   Count of stops within an 800m buffer (`st_buffer` + `st_join`)\
+-   Crime incident counts per tract for the last 12 months (`st_join` crimes to tracts and aggregate)
+
+------------------------------------------------------------------------
+
+# 7. Step 5: Eviction Lag Variables
+
+We assume you have already:
+
+-   Cleaned raw eviction records\
+
+-   Geocoded / joined them to tracts\
+
+-   Aggregated to a tract–month table `evictions_monthly` with:
+
+-   `GEOID` – census tract ID\
+
+-   `year_month` – a date (e.g., first day of month)\
+
+-   `eviction_filings` – count of filings in that tract and month
+
+```{r eviction-lags, eval=FALSE}
+# Example: read your pre-processed eviction data
+# evictions_monthly <- read_csv("data/evictions_monthly_cleaned.csv")
+
+evictions_with_lags <- evictions_monthly %>%
+  arrange(GEOID, year_month) %>%
+  group_by(GEOID) %>%
+  mutate(
+    evictions_lag1   = lag(eviction_filings, 1),   # 1 month ago
+    evictions_lag3   = lag(eviction_filings, 3),   # 3 months ago
+    evictions_lag6   = lag(eviction_filings, 6),   # 6 months ago
+    evictions_lag12  = lag(eviction_filings, 12),  # 12 months ago
+    evictions_avg_3mo = rollmean(eviction_filings, k = 3, fill = NA, align = "right"),
+    evictions_avg_6mo = rollmean(eviction_filings, k = 6, fill = NA, align = "right")
+  ) %>%
+  ungroup()
+
+head(evictions_with_lags)
+```
+
+------------------------------------------------------------------------
+
+# 8. Step 6: Merge All Data
+
+```{r merge-all, eval=FALSE}
+modeling_data <- evictions_with_lags %>%
+  left_join(acs_final,        by = "GEOID") %>%
+  left_join(property_summary, by = "GEOID") %>%
+  left_join(dist_to_court,    by = "GEOID")
+
+# For modeling, drop early months where lag variables are NA
+modeling_data_complete <- modeling_data %>%
+  filter(!is.na(evictions_lag1))
+
+# Optional: save final modeling dataset
+# write_csv(modeling_data_complete, "data/modeling_data_final.csv")
+
+summary(select(modeling_data_complete, eviction_filings, evictions_lag1, poverty_rate, pct_rent_burdened))
+```
+
+------------------------------------------------------------------------
+
+# 9. Next Steps: Modeling (Skeleton)
+
+Once the dataset is ready, you can:
+
+-   Split by time: training (e.g., 2020–2023) vs testing (2024)\
+-   Fit a Negative Binomial or Poisson model\
+-   Compare performance against a simple baseline (e.g., “next month = last month’s filings”)
+
+```{r model-skeleton, eval=FALSE}
+library(MASS)
+
+modeling_data_complete <- modeling_data_complete %>%
+  mutate(
+    year  = year(year_month),
+    month = month(year_month)
+  )
+
+train_data <- modeling_data_complete %>% filter(year <= 2023)
+test_data  <- modeling_data_complete %>% filter(year == 2024)
+
+nb_model <- glm.nb(
+  eviction_filings ~ 
+    evictions_lag1 + evictions_lag3 +
+    pct_rent_burdened + poverty_rate + unemployment_rate +
+    median_income + median_rent +
+    property_age + pct_renter +
+    dist_to_court_km +
+    factor(month),
+  data = train_data
+)
+
+summary(nb_model)
+
+test_data$pred_filings <- predict(nb_model, newdata = test_data, type = "response")
+
+mae  <- mean(abs(test_data$eviction_filings - test_data$pred_filings), na.rm = TRUE)
+rmse <- sqrt(mean((test_data$eviction_filings - test_data$pred_filings)^2, na.rm = TRUE))
+
+mae
+rmse
+```
+
+------------------------------------------------------------------------
+
+This QMD provides a clean, RSocrata-free pipeline for constructing the tract–month dataset needed for your eviction prediction project. You can extend it with EDA, maps, fairness checks, and policy recommendations in your final report.
