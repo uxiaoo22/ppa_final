@@ -1,22 +1,36 @@
 ---
-title: "Final"
-author: "Your Name"
-date: "2025-12-06"
-format: html
+title: "Philadelphia Eviction Forecasting Analysis"
+subtitle: "Spatiotemporal Modeling of Census-Tract-Level Eviction Filings"
+author: "Alex Stauffer, Xiao Yu, Qianmu Zheng"
+date: "2025-12-01"
+
+format:
+  html:
+    theme: yeti
+    highlight-style: tango
+    toc: true
+    toc-location: left
+    toc-expand: true
+    code-fold: true
+    code-summary: "Show code"
+    code-overflow: wrap
+    df-print: paged
+    code-tools: true
+
+editor: visual
 ---
 
 # Introduction
 
-Evictions represent a critical indicator of neighborhood instability and social vulnerability.  
+Evictions represent a critical indicator of neighborhood instability and social vulnerability.\
 In this project, our **dependent variable** is **Quarterly eviction total for 2024, aggregated at the census tract level in Philadelphia.**
 
 Our core research question is: **Can we predict quarterly eviction filing counts at the census-tract level 1–3 months (i.e., 1 quarter) in advance, enabling the City of Philadelphia to proactively deploy rental assistance, legal aid resources, and community outreach?**Including basic concepts as follows:
 
-- Spatial Unit: Census tract
-- Temporal Unit: Quarterly
-- Outcome: Number of eviction filings per tract per quarter
-- Model: Poisson / Negative Binomial (count outcome), Spatial Model, OLS Model
-
+-   Spatial Unit: Census tract
+-   Temporal Unit: Quarterly
+-   Outcome: Number of eviction filings per tract per quarter
+-   Model: Poisson / Negative Binomial (count outcome), Spatial Model, OLS Model
 
 **Why Use Quarterly Data?**
 
@@ -26,19 +40,21 @@ We therefore build a tract–quarter modeling dataset, while still allowing lag 
 
 We incorporate three major categories of predictors:
 
-1. **Structural characteristics** from ACS and property assessment data  
-2. **Spatial environmental features** such as crime and transit accessibility  
-3. **Temporal dynamics**, **Lag 1 quarter** (previous quarter’s evictions)
+1.  **Structural characteristics** from ACS and property assessment data\
+2.  **Spatial environmental features** such as crime and transit accessibility\
+3.  **Temporal dynamics**, **Lag 1 quarter** (previous quarter’s evictions)
 
 Our goal is to build and compare multiple statistical and spatial models to determine which approach most accurately predicts tract-level eviction activity.
-
-
 
 # Data Preparation and Cleaning
 
 This section describes the construction of the final analysis dataset, integrating multiple sources.
 
-```{r}
+```{r library_setup}
+#| warning: false
+#| message: false
+#| echo: false
+#| 
 library(tidycensus)
 library(sf)
 library(dplyr)
@@ -51,9 +67,41 @@ library(tidyverse)
 options(scipen=999)
 ```
 
+## Define Map Settings
+
+This code chunk defines map themes for uniformity.
+
+```{r maps}
+#| warning: false
+#| message: false
+#| echo: true
+mapTheme <- ggplot2::theme(
+  plot.title = ggplot2::element_text(size = 14, face = "bold"),
+  plot.subtitle = ggplot2::element_text(size = 10),
+  plot.caption = ggplot2::element_text(size = 8),
+  axis.line = ggplot2::element_blank(),
+  axis.text = ggplot2::element_blank(),
+  axis.ticks = ggplot2::element_blank(),
+  axis.title = ggplot2::element_blank(),
+  panel.background = ggplot2::element_blank(),
+  panel.border = ggplot2::element_blank(),
+  panel.grid.major = ggplot2::element_line(colour = 'transparent'),
+  panel.grid.minor = ggplot2::element_blank(),
+  legend.position = "right",
+  plot.margin = ggplot2::margin(1, 1, 1, 1, 'cm'),
+  legend.key.height = grid::unit(1, "cm"),
+  legend.key.width = grid::unit(0.2, "cm")
+)
+
+```
+
 ## Census Tracks
 
-```{r}
+```{r census_tract}
+
+#| warning: false
+#| message: false
+#| echo: false
 philly_tracts <- get_acs(
   geography = "tract",
   state = "PA",
@@ -67,12 +115,15 @@ philly_tracts <- philly_tracts %>%
   dplyr::select(GEOID, geometry)
 ```
 
-
 ## Dependent Variable: 2024 Quarterly Eviction Totals
 
 Eviction filing data from 2021–2024 were collected and aggregated to the tract–quarter level. (We use 2023 & 2024 evictions to make dependent variables and lags). Quarterly lags were computed to represent short-term momentum (lag 1).
 
-```{r}
+```{r evictions}
+
+#| warning: false
+#| message: false
+#| echo: true
 evictions_raw <- read.csv("data/philadelphia_weekly_2020_2021.csv")
 
 evictions_quarterly <- evictions_raw %>%
@@ -102,21 +153,19 @@ cat("Time periods:", paste(unique(evictions_quarterly$year_quarter), collapse = 
 
 We incorporate the following structural characteristics derived from ACS:
 
-- pct_black  
-- median_income  
-- pct_renter  
-- pct_rent_burdened  
-- median_rent  
-- property_age
+-   pct_black\
+-   median_income\
+-   pct_renter\
+-   pct_rent_burdened\
+-   median_rent\
+-   property_age
 
-```{r}
-if("package:MASS" %in% search()) {
-  detach("package:MASS", unload = TRUE)
-}
+```{r acs_factors}
+
+#| warning: false
+#| message: false
+#| echo: true
 library(dplyr)
-
-# Then try your select again
-
 acs_vars <- c(
   # Demographics
   total_pop          = "B01001_001",
@@ -218,7 +267,7 @@ acs_final <- acs_raw %>%
     # -------------------------
     property_age  = 2024 - median_year_builtE
   ) %>%
-  select(
+  dplyr::select(
     GEOID,
     total_popE,
     pct_white, pct_black, pct_hispanic, pct_asian,
@@ -238,22 +287,70 @@ acs_final <- acs_raw %>%
   )
 
 head(acs_final)
-write.csv(acs_final, "acs_final.csv", row.names = FALSE)
+# write.csv(acs_final, "acs_final.csv", row.names = FALSE)
 ```
+
+```{r acs_vars}
+
+#| warning: false
+#| message: false
+#| echo: true
+
+library(kableExtra)
+
+acs_selected <- tibble::tribble(
+~Variable,             ~Description,
+"pct_black",           "Percent of Black residents (racial composition indicator)",
+"median_income",       "Median household income (economic stability)",
+"pct_renter",          "Percent renter-occupied housing units (housing tenure)",
+"pct_rent_burdened",   "Percent of renters spending 30%+ income on rent",
+"median_rent",         "Median gross rent (housing cost)",
+"property_age",        "Age of housing stock based on median year built"
+)
+
+knitr::kable(
+acs_selected,
+caption = "Selected ACS Structural Predictors Included in the Eviction Models",
+align = "l",
+booktabs = TRUE
+) %>%
+kableExtra::kable_styling(full_width = FALSE, position = "center")
+
+```
+
+pct_black — captures structural racial inequalities and historical patterns of segregation that strongly predict eviction risk independent of income.
+
+median_income — measures neighborhood economic capacity; lower-income areas face higher rent-related financial stress.
+
+pct_renter — identifies neighborhoods with more renter households and higher exposure to eviction processes.
+
+pct_rent_burdened — one of the strongest empirical predictors of eviction; measures affordability pressure and vulnerability to income shocks.
+
+median_rent — indicates local housing market pressure and landlord incentives tied to rent level.
+
+property_age — proxies housing quality, deferred maintenance risk, and neighborhood disinvestment, all of which contribute to housing instability.
 
 ### Property Data
 
 Property characteristics include:
 
-- median_market_value  
-- pct_low_value  
-- pct_tax_delinquent
+-   median_market_value\
+-   pct_low_value\
+-   pct_tax_delinquent
 
-```{r}
+```{r opa_csv}
+#| warning: false
+#| message: false
+#| echo: false
 opa <- read_csv("data/opa_properties_public.csv")
 ```
-```{r}
+
+```{r opa_spatial}
 # spatial join
+
+#| warning: false
+#| message: false
+#| echo: false
 opa_xy <- opa %>%
   filter(!is.na(shape)) %>% 
   filter(str_detect(shape, "POINT\\(")) %>%
@@ -303,16 +400,54 @@ property_summary <- opa_clean %>%
 
 ```
 
+```{r opa_vars_kable}
+
+#| warning: false
+#| message: false
+#| echo: true
+
+library(kableExtra)
+library(dplyr)
+
+opa_vars <- tibble(
+Variable = c(
+"median_market_value",
+"pct_low_value",
+"pct_tax_delinquent"
+),
+Definition = c(
+"Median assessed market value of all OPA parcels in the census tract",
+"Share (%) of parcels valued below $100,000",
+"Share (%) of parcels with zero taxable building or land value (proxy for tax delinquency)"
+)
+)
+
+opa_vars %>%
+kable(
+format = "html",
+caption = "OPA Property Variables Used in Analysis",
+col.names = c("Variable", "Definition"),
+escape = FALSE
+) %>%
+kable_styling(
+bootstrap_options = c("striped", "hover", "condensed"),
+full_width = FALSE
+)
+
+```
 
 ## Spatial Variables
 
-Spatial features representing public safety and accessibility include:
-- **Crime activity** aggregated via spatial joins to census tracts  
-- **Transit accessibility**, measured through density of stations within walking distance  
+Spatial features representing public safety and accessibility include: - **Crime activity** aggregated via spatial joins to census tracts\
+- **Transit accessibility**, measured through density of stations within walking distance
 
 These variables quantify environmental exposure that may influence eviction risk.
 
-```{r}
+```{r tract_station}
+
+#| warning: false
+#| message: false
+#| echo: false
 tract_centroids <- st_centroid(philly_tracts)
 
 transit_raw <- read_csv("data/Transit_Stops.csv")
@@ -329,9 +464,21 @@ transit_summary <- station_join %>%
   group_by(GEOID) %>%
   summarise(n_stations_800m = n())
 ```
-```{r}
+
+To measure transit accessibility, we compute the number of transit stops within 800 meters of each census tract. Because buffers require a projected CRS for accurate distance calculations, we transform the tract geometries and transit points into Pennsylvania State Plane (EPSG:2272). We then create 800m buffers around tract centroids and spatially join all transit stops that fall within each buffer. This produces our accessibility metric n_stations_800m.
+
+```{r crime_data}
+
+#| warning: false
+#| message: false
+#| echo: false
+library(readr)
+library(stringr)
+
+# Load crime points
 crime <- read_csv("data/incidents_part1_part2.csv")
 
+# 
 crime_sf <- crime %>%
   filter(!is.na(lat), !is.na(lng)) %>%
   st_as_sf(coords = c("lng", "lat"), crs = 4326)
@@ -347,15 +494,21 @@ crime_summary <- crime_join %>%
   group_by(GEOID) %>%
   summarise(
     total_crimes = n()
-  )
+)
 ```
 
+Crime conditions represent an important neighborhood-level stressor that can influence eviction risk. High-crime environments often correlate with weaker housing markets, lower landlord investment, and reduced neighborhood stability. Violent crime may reflect concentrated disadvantage and social disorder, while property crime aligns with physical deterioration and economic vulnerability. Including crime rates allows the model to capture these environmental pressures and test whether areas experiencing higher levels of public safety risk also demonstrate elevated eviction activity.
 
-```{r}
+```{r crime_summary}
+
+
+#| warning: false
+#| message: false
+#| echo: false
 library(jsonlite)
 library(dplyr)
 
-# ACS 2022, Table B01003_001E (Total Population)
+# --- 1. Get ACS population for Philadelphia tracts ---
 url <- "https://api.census.gov/data/2022/acs/acs5?get=B01003_001E,NAME&for=tract:*&in=state:42%20county:101"
 
 philly_pop_raw <- fromJSON(url)
@@ -369,24 +522,63 @@ philly_pop <- philly_pop %>%
     population = as.numeric(population),
     GEOID = paste0(state, county, tract)
   ) %>%
-  select(GEOID, population)
+  dplyr::select(GEOID, population)
 
+# --- 2. Join population to crime summary & compute per-1,000 rates ---
 crime_summary <- crime_summary %>%
   left_join(philly_pop, by = "GEOID") %>%
   mutate(
-    crime_rate = total_crimes / (population / 1000)
+    crime_rate_total   = total_crimes / (population / 1000)
+  )
+
+
+```
+
+```{r crime_kable}
+
+#| warning: false
+#| message: false
+#| echo: true
+
+library(kableExtra)
+library(dplyr)
+
+crime_summary_vars <- tibble(
+  Variable = c(
+    "total_crimes",
+    "population",
+    "crime_rate_total"
+  ),
+  Definition = c(
+    "Total number of reported Part 1 & Part 2 crimes spatially joined to each census tract.",
+    "ACS 2022 total population for the tract, used to standardize crime counts.",
+    "Crime incidents per 1,000 residents (total_crimes ÷ population/1000)."
+  )
+)
+
+crime_summary_vars %>%
+  kable(
+    format = "html",
+    caption = "Crime Summary Variables Used in Analysis",
+    col.names = c("Variable", "Definition"),
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
   )
 
 ```
 
-
 ## Temporal Lags
-Two temporal lag measures were added (We use Lag1 for following models):
-- **Lag 1 (t–1 quarter):** captures short-term persistence  
-- **Lag 2 (t–4 quarters):** captures seasonal effects across years  
 
+Two temporal lag measures were added (We use Lag1 for following models): - **Lag 1 (t–1 quarter):** captures short-term persistence\
+- **Lag 2 (t–4 quarters):** captures seasonal effects across years
 
-```{r}
+```{r evictions_lags}
+#| warning: false
+#| message: false
+#| echo: true
 evictions_with_lags <- evictions_quarterly %>%
   arrange(GEOID, year, quarter) %>%
   group_by(GEOID) %>%
@@ -404,13 +596,15 @@ evictions_with_lags <- evictions_quarterly %>%
 head(evictions_with_lags)
 ```
 
-
-```{r}
+```{r evic_filter}
+#| warning: false
+#| message: false
+#| echo: false
 evictions_2024_raw <- evictions_with_lags %>%
   filter(year == 2024)
 
 numeric_cols <- evictions_2024_raw %>%
-  select(where(is.numeric)) %>%
+  dplyr::select(where(is.numeric)) %>%
   names()
 
 evictions_2024_quarterly <- evictions_2024_raw %>%
@@ -422,12 +616,14 @@ evictions_2024_quarterly <- evictions_2024_raw %>%
 
 ```
 
-
 ## Merge All Data
 
 All variables were merged into a unified census-tract-level dataset for 2024 modeling and performance evaluation.
 
-```{r}
+```{r merge_all}
+#| warning: false
+#| message: false
+#| echo: true
 final_panel <- evictions_2024_quarterly %>%
   # 1. Join ACS structural data
   left_join(acs_final, by = "GEOID") %>%
@@ -451,21 +647,22 @@ cat("Columns:", ncol(final_panel), "\n")
 cat("Unique tracts:", n_distinct(final_panel$GEOID), "\n\n")
 
 # Optional: save final merged table
-write_csv(st_drop_geometry(final_panel), "data/final_panel_no_geometry.csv")
-st_write(final_panel, "data/final_panel.geojson", delete_dsn = TRUE)
+# write_csv(st_drop_geometry(final_panel), "data/final_panel_no_geometry.csv")
+# st_write(final_panel, "data/final_panel.geojson", delete_dsn = TRUE)
 
 ```
-
-
 
 # Exploration
 
 This section presents exploratory data analysis, focusing on spatial patterns and distributional characteristics.
 
-```{r}
-philly_tracts_2 <- st_read(
-  "/Users/cathy/GitHub/portfolio-setup-uxiaoo22/Assignments/Final/ppa_final/copy_github2/data/tl_2020_42_tract/tl_2020_42_tract.shp"
-)
+This code block reloads our tracts.
+
+```{r EDA}
+#| warning: false
+#| message: false
+#| echo: false
+philly_tracts_2 <- st_read("/Users/cathy/GitHub/portfolio-setup-uxiaoo22/Assignments/Final/ppa_final/copy_github2/data/tl_2020_42_tract/tl_2020_42_tract.shp")
 
 
 df <- read_csv("data/final_panel_no_geometry.csv")
@@ -475,44 +672,49 @@ df_sf_2 <- philly_tracts_2 %>%
   right_join(df, by = "GEOID") %>%
   st_as_sf()
 ```
-## Eviction Data Analysis 
-- Mapping quarterly eviction totals to visualize spatial clustering  
-- Distributional summaries of eviction variations across tracts  
-- Time-series inspection of lag relationships  
-- Exploration of spatial autocorrelation  
 
+## Eviction Data Analysis
+
+-   Mapping quarterly eviction totals to visualize spatial clustering\
+-   Distributional summaries of eviction variations across tracts\
+-   Time-series inspection of lag relationships\
+-   Exploration of spatial autocorrelation
 
 ### Dependent Variable vs. Time Lag (Quarterly Evictions)
 
 The dependent variable (evictions in each quarter of 2024) and its lagged version show nearly identical spatial patterns, with concentrations primarily in West and Central Philadelphia. This suggests strong temporal persistence in eviction risk.
 
-```{r}
+```{r evict_map }
+
+#| warning: false
+#| message: false
+#| echo: true
+
 ggplot(df_sf_2) +
   geom_sf(aes(fill = filings_2020), color = NA) +
-  scale_fill_viridis_c(option = "magma", direction = -1) +
-  theme_minimal() +
+  scale_fill_viridis_c(option = "magma", direction = -1, na.value = "grey90") +
   labs(
-    title = "Eviction Filings (2024)",
-    fill = "filings"
+    title = "Eviction Filings by Census Tract (2020)",
+    fill = "Filings"
   ) +
-  theme(
-    panel.grid = element_blank(),
-    plot.title = element_text(size = 16, face = "bold")
-  )
+  mapTheme
+
 ```
-```{r}
+
+```{r lag_map}
+#| warning: false
+#| message: false
+#| echo: true
+
 ggplot(df_sf_2) +
   geom_sf(aes(fill = evictions_lag1Q), color = NA) +
-  scale_fill_viridis_c(option = "magma", direction = -1) +
-  theme_minimal() +
+  scale_fill_viridis_c(option = "magma", direction = -1, na.value = "grey90") +
   labs(
-    title = "Evictions Time Lag:1Q",
-    fill = "filings"
+    title = "Evictions Lagged by 1 Quarter",
+    fill = "Lagged Filings"
   ) +
-  theme(
-    panel.grid = element_blank(),
-    plot.title = element_text(size = 16, face = "bold")
-  )
+  mapTheme
+
 ```
 
 ### Distributional Assessment of the Dependent Variable
@@ -521,7 +723,10 @@ Eviction filings exhibit severe right-skewness.
 
 For OLS models, a log transformation is recommended. For Poisson-type count models, no transformation is required because the GLM framework already accommodates non-negative skewed counts. Given the discrete nature of the outcome, Poisson/NB regression is more appropriate.
 
-```{r}
+```{r eviction_dist}
+#| warning: false
+#| message: false
+#| echo: true
 df_sf_2 %>%
   st_drop_geometry() %>%
   ggplot(aes(x = filings_2020)) +
@@ -534,12 +739,14 @@ df_sf_2 %>%
   )
 ```
 
-
 ### Linear Relationship Examination
 
 **The strongest linear relationship observed is between eviction filings and their time lag**, confirming strong short-term temporal dependence. Other predictors show weaker linearity, suggesting that OLS alone may not capture full dynamics.
 
-```{r}
+```{r lag-current}
+#| warning: false
+#| message: false
+#| echo: true
 df_sf_2 %>%
   st_drop_geometry() %>%
   ggplot(aes(x = evictions_lag1Q, y = filings_2020)) +
@@ -557,7 +764,10 @@ df_sf_2 %>%
 
 Strong global and local spatial autocorrelation is detected. High–high and low–low clusters appear clearly across the city, indicating that spatial structure is an essential component for subsequent modeling.
 
-```{r}
+```{r SA_clustering}
+#| warning: false
+#| message: false
+#| echo: true
 library(spdep)
 
 # neighbors
@@ -568,7 +778,13 @@ lw <- nb2listw(nb, style = "W")
 moran_filings <- moran.test(df_sf_2$filings_2020, lw)
 moran_filings
 ```
-```{r}
+
+There is spatial autocorrelation with the Moran's I equal to almost 0.3 and statistically significant. Census tracts with high eviction filings tend to be near other high-eviction tracts, and low eviction tracts near other low eviction tracts. We will investigate these spatial relationships visually below.
+
+```{r local moran}
+#| warning: false
+#| message: false
+#| echo: true
 local_moran <- localmoran(df_sf_2$filings_2020, lw)
 df_lisa <- df_sf_2 %>%
   mutate(
@@ -594,9 +810,9 @@ df_lisa <- df_lisa %>%
   )
 
 lisa_colors <- c(
-  "High-High" = "#fca636",
+  "High-High" = "#A81F00",
   "Low-Low" = "#4575b4",
-  "High-Low" = "#fff4b0",
+  "High-Low" = "#F76060",
   "Low-High" = "#91bfdb",
   "Not Significant" = "#F2F2F2"
 )
@@ -609,32 +825,35 @@ ggplot(df_lisa) +
     title = "LISA Cluster Map for Eviction Filings (2024)",
     fill = "Cluster Type"
   ) +
-  theme(
-    panel.grid = element_blank(),
-    plot.title = element_text(size = 16, face = "bold")
-  )
+  mapTheme
 
 ```
 
+The LISA map reveals significant spatial clusters of eviction activity across Philadelphia, indicating that higher patterns (dark red High-High clusters) are not randomly distributed but have localized patterns. North Philadelphia, West Philadelphia, and Southwest Philadelphia appear to be eviction hotspots, suggesting entrenched housing instability.
 
-## Structural and property Features
+The Low-Low clusters are primarily in Center City and the some of the suburbs in the Northwest. These areas are typically higher-income, higher-amenity neighborhoods with stronger housing stability.
 
-- Mapping ACS variables, property indicators 
-- Exploration of spatial autocorrelation in predictors 
+## Structural and Property Features
 
+-   Mapping ACS variables, property indicators
+-   Exploration of spatial autocorrelation in predictors
 
 ### ACS Variables Used
 
 We incorporate the following structural characteristics derived from ACS:
 
-- pct_black  
-- median_income  
-- pct_renter  
-- pct_rent_burdened  
-- median_rent  
-- property_age
-  
-```{r}
+-   pct_black\
+-   median_income\
+-   pct_renter\
+-   pct_rent_burdened\
+-   median_rent\
+-   property_age
+
+```{r acs_eda}
+#| warning: false
+#| message: false
+#| echo: true
+
 library(viridis)
 library(patchwork)
 
@@ -679,13 +898,17 @@ plot_list <- lapply(vars_to_plot, plot_var)
 ```
 
 ### Property Variables Used
+
 Property characteristics include:
 
-- median_market_value  
-- pct_low_value  
-- pct_tax_delinquent
+-   median_market_value\
+-   pct_low_value\
+-   pct_tax_delinquent
 
-```{r}
+```{r property_vars}
+#| warning: false
+#| message: false
+#| echo: true
 vars_to_plot <- c(
   "median_market_value",
   "pct_low_value",
@@ -726,7 +949,10 @@ patchwork::wrap_plots(plot_list, ncol = 3)
 
 **All structural and property predictors exhibit strong spatial autocorrelation.** This confirms that spatial dependence is inherent across most socioeconomic conditions, reinforcing the need for spatially informed modeling strategies.
 
-```{r}
+```{r morans_i}
+#| warning: false
+#| message: false
+#| echo: true
 # Define the structural variables to test
 vars_struct <- c(
   "pct_black",
@@ -740,7 +966,6 @@ vars_struct <- c(
   "pct_tax_delinquent"
 )
 
-# Then run your existing Moran's I code
 moran_results <- lapply(vars_struct, function(v) {
   test <- moran.test(df_sf_2[[v]], lw)
   
@@ -756,17 +981,22 @@ moran_results <- lapply(vars_struct, function(v) {
 moran_df <- do.call(rbind, moran_results)
 moran_df
 
-
 ```
 
-## spatial data 
 
-- Spatial distribution and diagnostics for crime concentrations and transit accessibility.
+All nine structural predictors exhibit strong and statistically significant positive spatial autocorrelation (Moran’s I between 0.38 and 0.86, all p \< 0.001). This means these socioeconomic and housing variables cluster spatially rather than being randomly distributed across Philadelphia.
 
-Both crime rate and transit accessibility display strong central-city clustering patterns.  
+## Spatial Data
+
+-   Spatial distribution and diagnostics for crime concentrations and transit accessibility.
+
+Both crime rate and transit accessibility display strong central-city clustering patterns.\
 These spatial features help contextualize neighborhood-level vulnerabilities and guide expectations for model performance.
 
-```{r}
+```{r crime}
+#| warning: false
+#| message: false
+#| echo: true
 ggplot(df_sf_2) +
   geom_sf(aes(fill = crime_rate), color = NA) +
   scale_fill_viridis_c(option = "viridis") +
@@ -775,13 +1005,13 @@ ggplot(df_sf_2) +
     title = "Crime Rate by Tract",
     fill = "Crime Rate"
   ) +
-    theme(
-      axis.text = element_blank(),
-      axis.ticks = element_blank(),
-      axis.title = element_blank()
-    )
+ mapTheme
 ```
-```{r}
+
+```{r transit_eda}
+#| warning: false
+#| message: false
+#| echo: true
 ggplot(df_sf_2) +
   geom_sf(aes(fill = n_stations_800m), color = NA) +
   scale_fill_viridis_c(option = "viridis") +
@@ -790,11 +1020,7 @@ ggplot(df_sf_2) +
     title = "Transit Access (Stations within 800m)",
     fill = "Stations"
   ) +
-    theme(
-      axis.text = element_blank(),
-      axis.ticks = element_blank(),
-      axis.title = element_blank()
-    )
+mapTheme
 
 ```
 
@@ -802,10 +1028,16 @@ ggplot(df_sf_2) +
 
 ### Linear Relationships
 
-Scatterplot examinations show that time lag exhibits the strongest linear association with eviction filings. Most other predictors show weak or nonlinear relationships.  
+Scatterplot examinations show that time lag exhibits the strongest linear association with eviction filings. Most other predictors show weak or nonlinear relationships.
 This indicates that linear models alone may overlook important structural and spatial effects—additional modeling strategies (e.g., Poisson, NB, spatial models) are required.
 
-```{r}
+```{r linear_var_relation}
+#| warning: false
+#| message: false
+#| echo: true
+
+library(scales)
+
 vars_to_plot <- c(
   "pct_black",
   "median_income", 
@@ -836,7 +1068,7 @@ pretty_titles <- c(
 
 plot_list <- lapply(vars_to_plot, function(v) {
 
-  df_sf_2 %>%
+  p <- df_sf_2 %>%
     st_drop_geometry() %>%
     ggplot(aes(x = .data[[v]], y = filings_2020)) +
     geom_point(alpha = 0.5, color = "#fb6a4a", size = 1.2) +
@@ -848,12 +1080,33 @@ plot_list <- lapply(vars_to_plot, function(v) {
       y = "Eviction Filings"
     ) +
     theme(
-      aspect.ratio = 0.8, 
+      aspect.ratio = 0.8,
       plot.title = element_text(size = 11, face = "bold"),
       axis.title = element_text(size = 9),
       axis.text = element_text(size = 8),
-      panel.grid.minor = element_blank()
+      panel.grid.minor = element_blank(),
+      plot.margin = margin(2, 2, 2, 2)
     )
+
+  # ===== Special axis formatting to prevent squeezing =====
+
+  # Large-money variables → use SI labels ("50 k", "2 M")
+  if (v %in% c("median_income", "median_market_value")) {
+    p <- p + scale_x_continuous(
+      labels = scales::label_number(scale_cut = scales::cut_si(" ")),
+      breaks = scales::breaks_pretty(4)
+    )
+  }
+
+  # Transit Stations → also use SI labels ("1 k", "2 k") to prevent smushing
+  if (v == "n_stations_800m") {
+    p <- p + scale_x_continuous(
+      labels = scales::label_number(scale_cut = scales::cut_si(" ")),
+      breaks = scales::breaks_pretty(4)
+    )
+  }
+
+  p
 })
 
 combined_plot <- wrap_plots(plot_list, ncol = NULL)
@@ -863,12 +1116,14 @@ combined_plot
 
 ### Correlation analysis
 
-Correlation tests show that most predictors are only weakly correlated.  
+Correlation tests show that most predictors are only weakly correlated.
 However, some ACS variables exhibit moderate correlation (Pearson r = 0.6–0.7), which is common in socioeconomic datasets.
+```{r build_corr_df}
+#| warning: false
+#| message: false
+#| echo: false
 
-```{r}
-# Define variables for correlation analysis
-vars_to_corr <- c(
+vars <- c(
   "evictions_lag1Q",
   "pct_black",
   "median_income", 
@@ -883,15 +1138,26 @@ vars_to_corr <- c(
   "crime_rate"
 )
 
-# Calculate correlation matrix
-corr_matrix <- cor(df[, vars_to_corr], use = "complete.obs")
+df_numeric <- df_sf_2 %>%
+  st_drop_geometry() %>%
+  dplyr::select(all_of(vars))
 
-# Convert to long format for ggplot
-library(reshape2)
-corr_df <- melt(corr_matrix)
-names(corr_df) <- c("var1", "var2", "corr")
+corr_matrix <- cor(df_numeric, use = "pairwise.complete.obs")
 
-# Plot the heatmap
+corr_df <- as.data.frame(as.table(corr_matrix)) %>%
+  rename(
+    var1 = Var1,
+    var2 = Var2,
+    corr = Freq
+  )
+
+```
+
+```{r matrix}
+#| warning: false
+#| message: false
+#| echo: true
+
 ggplot(corr_df, aes(x = var1, y = var2, fill = corr)) +
   geom_tile(color = "white") +
   geom_text(
@@ -916,39 +1182,79 @@ ggplot(corr_df, aes(x = var1, y = var2, fill = corr)) +
   )
 
 ```
+The correlation matrix indicates structural divides in the study area. Eviction filings show the strongest positive associations with the percentage of Black residents, the share of low-value and tax-delinquent properties, and crime rates—suggesting that eviction risk is concentrated in neighborhoods marked by racialized socioeconomic disadvantage and housing distress. In contrast, economic indicators such as income, rents, and market values correlate strongly with one another but only weakly with evictions, reflecting their role in a broader pattern of neighborhood stratification rather than as direct predictors. These relationships reveal two distinct neighborhood profiles—advantaged, higher-value areas and disadvantaged, disinvested areas—with eviction activity most pronounced in the latter.
+
 
 ### VIF test
 
-Variance Inflation Factors across all predictors remain below 5, indicating no severe multicollinearity.  
-The predictor set is appropriate for regression modeling.
-
+Variance Inflation Factors across all predictors remain below 5, indicating no severe multicollinearity.The predictor set is appropriate for regression modeling.
 ```{r}
+#| label: define-vars-to-corr
+#| warning: false
+#| message: false
+
+vars_to_corr <- c(
+  "evictions_lag1Q",
+  "pct_black",
+  "median_income", 
+  "pct_renter",
+  "pct_rent_burdened",
+  "median_rent",
+  "property_age",
+  "median_market_value",
+  "pct_low_value",
+  "pct_tax_delinquent",
+  "n_stations_800m",
+  "crime_rate"
+)
+
+```
+
+```{r vif}
+#| warning: false
+#| message: false
+#| echo: true
+
 library(car)
 
-# VIF examination: ALL OKAY
+# Build formula
 vif_formula <- as.formula(
   paste("filings_2020 ~", paste(vars_to_corr, collapse = " + "))
 )
 
+# Run OLS
 vif_ols <- lm(vif_formula, data = df)
 
+# Create VIF table
 vif_table <- vif(vif_ols) %>%
   as.data.frame() %>%
   rownames_to_column("Variable") %>%
   rename(VIF = 2)
 
-vif_table
+# Display styled kable
+vif_table %>%
+  kable(
+    format = "html",
+    caption = "Variance Inflation Factors for OLS Model",
+    col.names = c("Variable", "VIF"),
+    digits = 2,
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+
 ```
-
-
-
 
 # Modeling
 
-Our modeling strategy progresses from simple baselines to increasingly realistic representations of temporal dependence, spatial dependence, and distributional properties of eviction filings.
-Because eviction data exhibit strong spatial clustering and temporal persistence, we fit **6 models** and compare their performance and theoretical validity.
+Our modeling strategy progresses from simple baselines to increasingly realistic representations of temporal dependence, spatial dependence, and distributional properties of eviction filings. Because eviction data exhibit strong spatial clustering and temporal persistence, we fit **6 models** and compare their performance and theoretical validity.
 
-```{r}
+```{r vars-create}
+#| warning: false
+#| message: false
+#| echo: false
 library(spdep)
 library(MASS)      # for Negative Binomial
 library(spatialreg)
@@ -1002,44 +1308,47 @@ formula_lag <- as.formula(
 
 ```
 
-
-
 ## Model 1 — Baseline OLS (Cross-sectional)
 
-**Specification:**Evict_2024 ~ ACS + property + spatial
+**Specification:**Evict_2024 \~ ACS + property + spatial
 
 A simple benchmark without temporal or spatial components.Very low explanatory power (R² = 0.26) and cannot capture either temporal persistence or spatial clustering.
 
-```{r}
+```{r ols}
+#| warning: false
+#| message: false
+#| echo: true
 model1_ols <- lm(formula_ols, data = df)
 
 summary(model1_ols)
 
 ```
 
-
 ## Model 2 — Time-lagged OLS
 
-**Specification:**Evict_2024 ~ Time lag + ACS + property + spatial
+**Specification:**Evict_2024 \~ Time lag + ACS + property + spatial
 
-Introduce temporal dependence using the previous quarter’s eviction filings.
-**Model fit increases dramatically (R² = 0.91), suggesting eviction filings are highly time-lag-dependent.** But all other variables are insignificant and spatial autocorrelation remains in residuals. It is still biased.
+Introduce temporal dependence using the previous quarter’s eviction filings. **Model fit increases dramatically (R² = 0.91), suggesting eviction filings are highly time-lag-dependent.** But all other variables are insignificant and spatial autocorrelation remains in residuals. It is still biased.
 
-```{r}
+```{r ols_lag}
+#| warning: false
+#| message: false
+#| echo: true
 model2_lag_ols <- lm(formula_lag, data = df)
 
 summary(model2_lag_ols)
 ```
 
-
-
 ## Model 3 — Count Data Models (Poisson)
 
-**Specification:**NB(Evict_2024) ~ Time lag + ACS + property + spatial
+**Specification:**NB(Evict_2024) \~ Time lag + ACS + property + spatial
 
 Use Poisson regression to address the count nature of eviction filings. Better suited for non-negative, skewed count outcomes; Improves statistical consistency compared to OLS; But still ignores spatial dependence.
 
-```{r}
+```{r poisson}
+#| warning: false
+#| message: false
+#| echo: true
 model3_poisson <- glm(formula_lag, 
                       data = df, 
                       family = poisson())
@@ -1048,7 +1357,12 @@ summary(model3_poisson)
 
 ```
 
-```{r}
+### Dispersion Test 
+
+```{r disp}
+#| warning: false
+#| message: false
+#| echo: true
 library(AER)
 
 disp_test <- dispersiontest(model3_poisson)
@@ -1056,7 +1370,14 @@ disp_test
 
 ```
 
-```{r}
+The dispersion test shows strong evidence of overdispersion in the Poisson model (z = 7.09, p < 0.001), with an estimated dispersion of 1.78. This indicates that the variance in the outcome substantially exceeds the mean, violating a key Poisson assumption. As a result, the Poisson model likely underestimates standard errors, and a Negative Binomial model is more appropriate for these data.
+
+## Negative Binomial Regression
+
+```{r nb_model }
+#| warning: false
+#| message: false
+#| echo: true
 library(MASS)
 
 model3_nb <- glm.nb(
@@ -1066,18 +1387,24 @@ model3_nb <- glm.nb(
 
 summary(model3_nb)
 ```
+The negative binomial model indicates that prior eviction activity, racial composition, and renter-related characteristics are significant predictors of quarterly eviction filings. Lagged evictions show the strongest association, meaning tracts with higher past filings tend to continue experiencing elevated eviction levels over time. 
 
-
+Several socioeconomic variables—including the percentage of Black residents, renter concentration, rent burden, lower market values, and older housing—are also positively or negatively associated with eviction counts in expected directions, reflecting structural disadvantage and housing precarity. The negative binomial specification provides a better fit than the Poisson model (lower AIC, reduced deviance), confirming that overdispersion was present and that this model more appropriately captures variation in eviction outcomes.
 
 ## Model 4 — Spatial Lag Models (SAR / SLX)
 
-Account for strong spatial autocorrelation in both outcome and predictors. All key variables show extremely strong spatial autocorrelation (Moran’s I p ≈ 0), **showing that spatial autocorrelation feature is very significant and need to be consider.**
+Account for strong spatial autocorrelation in both outcome and predictors. All key variables show extremely strong spatial autocorrelation (Moran’s I p ≈ 0), showing that spatial autocorrelation feature is very significant and need to be consider.
 
 SAR achieves the best AIC among the traditional models, However, most covariates become statistically insignificant, likely due to multicollinearity induced by spatial spillovers.
 
 Overall, it captures spatial processes but loses interpretability and still does not handle count distribution.
 
-```{r}
+
+### Setup variables
+```{r sar/slx}
+#| warning: false
+#| message: false
+#| echo: false
 library(spdep)
 
 df_sf <- df %>%
@@ -1093,14 +1420,16 @@ lw <- nb2listw(nb, style = "W")
 
 ```
 
-
 ### SLX Model:
 
-**Specification:**Evict_2024 ~ Time lag + X + W * X
+**Specification:**Evict_2024 \~ Time lag + X + W \* X
 
 Captures spatial spillover in predictors.
 
-```{r}
+```{r slx}
+#| warning: false
+#| message: false
+#| echo: true
 model4_slx <- lmSLX(
   formula_lag,
   data = df,
@@ -1110,14 +1439,16 @@ model4_slx <- lmSLX(
 summary(model4_slx)
 ```
 
-
 ### SAR Model:
 
-**Specification:**Evict_2024 = ρ (W * Evict_2024) + βX + ε
+**Specification:**Evict_2024 = ρ (W \* Evict_2024) + βX + ε
 
 Captures spatial dependence directly in the outcome.
 
-```{r}
+```{r sar}
+#| warning: false
+#| message: false
+#| echo: true
 model4_sar <- lagsarlm(
   formula_lag,
   data = df,
@@ -1127,16 +1458,18 @@ model4_sar <- lagsarlm(
 summary(model4_sar)
 ```
 
-
 ## Model 5 — Poisson+spatial lag
 
-**Specification:**Evict_2024 = TimeLag_i + X_i + W * X_i
+**Specification:**Evict_2024 = TimeLag_i + X_i + W \* X_i
 
-Model 5 extends a basic Poisson regression by **adding spatially lagged independent variables (W·X)**. This assumes eviction patterns are influenced not only by each tract’s own characteristics (X) but also by conditions in nearby tracts. Including W·X helps capture neighborhood spillover—how surrounding poverty, rent burden, or market values can shape local eviction risk. The model**Combines strengths of Poisson (for count data) and spatial lag (for spillovers).**  
+Model 5 extends a basic Poisson regression by adding spatially lagged independent variables (W·X). This assumes eviction patterns are influenced not only by each tract’s own characteristics (X) but also by conditions in nearby tracts. Including W·X helps capture neighborhood spillover—how surrounding poverty, rent burden, or market values can shape local eviction risk. The model**Combines strengths of Poisson (for count data) and spatial lag (for spillovers).
 
 It is more realistic for eviction processes: temporal, spatial, outcome, but residual Moran’s I indicates remaining spatial autocorrelation, meaning the model is still misspecified. Moving in the right direction, but spatial heterogeneity is not fully adjusted.
 
-```{r}
+```{r poissn_lag}
+#| warning: false
+#| message: false
+#| echo: false
 num_vars <- c(
   "evictions_lag1Q", 
   "pct_renter", "crime_rate"
@@ -1153,8 +1486,10 @@ df$W_crime_rate  <- lag.listw(lw, df$crime_rate)
 
 ```
 
-
-```{r}
+```{r poisson_spatial_formula}
+#| warning: false
+#| message: false
+#| echo: true
 formula_text <- paste(
   "filings_2020 ~ evictions_lag1Q + W_evictions_lag1Q +",
   "poverty_rate + vacant_units + pct_renter + pct_black + median_income + pct_rent_burdened + median_rent + property_age + median_market_value + pct_low_value + pct_tax_delinquent + n_stations_800m + crime_rate +",
@@ -1172,14 +1507,19 @@ model5 <- glm(
 summary(model5)
 ```
 
-
-```{r}
+```{r model5_disp}
+#| warning: false
+#| message: false
+#| echo: true
 disp_test <- dispersiontest(model5)
 disp_test
 ```
+A dispersion test was conducted to assess whether the Poisson assumptions held in Model 5. The test indicated significant overdispersion (dispersion = 1.65, p < 0.001), meaning the variance in eviction counts exceeded the Poisson expectation. This suggests that Model 5 underestimates standard errors and that a Negative Binomial specification would provide a more appropriate fit.
 
-
-```{r}
+```{r model5nb}
+#| warning: false
+#| message: false
+#| echo: true
 model5_nb <- glm.nb(
   formula_st_poisson_5,
   data = df
@@ -1188,19 +1528,20 @@ model5_nb <- glm.nb(
 summary(model5_nb)
 ```
 
-
 ## Model 6 — fixing spatial autocorrelation
 
-**Specification:**Evict_2024 ~ TimeLag + X_i + W * X_i + eig1 + eig2 + eig3 + ...
+**Specification:**Evict_2024 \~ TimeLag + X_i + W \* X_i + eig1 + eig2 + eig3 + ...
 
-FINAL MODEL. It incorporates **spatial eigenvectors** to absorb unmeasured spatial patterns.
-Instead of adding spatially lagged predictors, this model adds a few eigenvectors (eig1, eig2, eig3…) that represent broad spatial structure. This helps reduce spatial autocorrelation in residuals and improves model stability. Fix remaining spatial autocorrelation by adding **Moran’s Eigenvector (ME) terms** to Model 5.
+FINAL MODEL. It incorporates spatial eigenvectors to absorb unmeasured spatial patterns. Instead of adding spatially lagged predictors, this model adds a few eigenvectors (eig1, eig2, eig3…) that represent broad spatial structure. This helps reduce spatial autocorrelation in residuals and improves model stability. Fix remaining spatial autocorrelation by adding Moran’s Eigenvector (ME) terms to Model 5.
 
-ME terms successfully remove spatial dependence in residuals. **And AIC decreases further, showing best-performing model overall.**
+ME terms successfully remove spatial dependence in residuals. And AIC decreases further, showing best-performing model overall.
 
 In this model, coefficients become more stable and interpretable, and satisfies temporal, spatial, and distributional assumptions simultaneously
 
-```{r}
+```{r model6}
+#| warning: false
+#| message: false
+#| echo: true
 lw_mat <- listw2mat(lw)
 
 
@@ -1234,12 +1575,19 @@ summary(model6)
 
 ```
 
-```{r}
+```{r model6_disp}
+#| warning: false
+#| message: false
+#| echo: true
 disp_test <- dispersiontest(model6)
 disp_test
 ```
+The dispersion test for Model 6 indicates significant overdispersion (dispersion = 1.59; z = 6.55, p < 0.001), meaning the variance of quarterly eviction counts is substantially larger than what the Poisson model assumes. Even after adding spatially lagged covariates and eigenvector terms to account for spatial dependence, the Poisson specification still understates variability in the data. As a result, Model 6 likely produces standard errors that are too small and may overstate the statistical significance of some predictors. This confirms that a Negative Binomial version of Model 6—which explicitly models overdispersion—would provide a more reliable fit for eviction patterns.
 
-```{r}
+```{r nb_model6 }
+#| warning: false
+#| message: false
+#| echo: true
 model6_nb <- glm.nb(
   formula_st_poisson_6,
   data = df
@@ -1248,15 +1596,11 @@ model6_nb <- glm.nb(
 summary(model6_nb)
 ```
 
-
 Model 6 provides the most accurate and theoretically justified explanation of eviction filings because it integrates **temporal dependence (lag); spatial spillovers (W·terms); count modeling (Poisson) and unobserved spatial heterogeneity (eigenvectors).**
 
 This combination corrects model misspecification, reduces AIC, and yields interpretable and robust estimates.
 
-
-
 # Model Diagnostics and Validation
-
 
 ## AIC
 
@@ -1264,15 +1608,53 @@ AIC can only be compared between models estimated under the same likelihood fami
 
 In Poisson family: **Model6_NB achieves the lowest AIC among comparable models, meaning it provides the best overall likelihood fit within the NB family.** Adding spatial structure (W·X in Model5, eigenvectors in Model6) improves model fit, with spatial filtering (Model6) performing best.
 
-```{r}
-AIC(model1_ols, model2_lag_ols, model3_nb, model4_sar, model5_nb, model6_nb)
+```{r aic}
+#| warning: false
+#| message: false
+#| echo: true
+
+library(kableExtra)
+library(dplyr)
+library(tibble)
+
+# Compute AIC values
+aic_table <- AIC(
+  model1_ols,
+  model2_lag_ols,
+  model3_nb,
+  model4_sar,
+  model5_nb,
+  model6_nb
+) %>%
+  as.data.frame() %>%
+  rownames_to_column("Model") %>%
+  # Rename *both* numeric columns: first = df, second = AIC
+  rename(
+    df  = 2,
+    AIC = 3
+  )
+
+# Styled kable
+aic_table %>%
+  kable(
+    format = "html",
+    caption = "AIC Comparison Across Models",
+    col.names = c("Model", "df", "AIC"),
+    digits = 2,
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+
 ```
 
 ## Cross-Validation
 
 Cross-validation metrics (MAE, RMSE, pseudo-R²) evaluate predictive accuracy, regardless of likelihood family. These metrics can be compared across OLS, Poisson, NB, and spatial models because they are computed on the same prediction scale.
 
-Model 1 performs the worst, confirming that a simple OLS cannot capture eviction dynamics. **Model 2 achieves the best predictive accuracy overall, reflecting the strong temporal persistence in eviction filings; however, because it captures only time-lag effects and leaves severe spatial autocorrelation unresolved, it is not an adequate structural model.**
+Model 1 performs the worst, confirming that a simple OLS cannot capture eviction dynamics. Model 2 achieves the best predictive accuracy overall, reflecting the strong temporal persistence in eviction filings; however, because it captures only time-lag effects and leaves severe spatial autocorrelation unresolved, it is not an adequate structural model.
 
 Poisson-based models (Models 3 and 5) perform more consistently across time by aligning with the count nature of eviction data, and Model 5 further improves by incorporating spatial spillovers. The final Model 6 produces similarly strong predictive performance while also fixing residual spatial dependence through Moran’s eigenvectors, yielding the most theoretically complete and empirically reliable model.
 
@@ -1282,30 +1664,50 @@ Therefore, despite Model 2’s raw accuracy, Model 6 is the chosen final model b
 
 ### Total RMSE
 ```{r}
-library(purrr)
 
-# --- Performance function  ---
+#| warning: false
+#| message: false
+
 perf <- function(actual, predicted) {
   list(
     MAE  = mean(abs(actual - predicted)),
     RMSE = sqrt(mean((actual - predicted)^2)),
-    R2   = 1 - sum((actual - predicted)^2) / sum((actual - mean(actual))^2)
+    R2   = 1 - sum((actual - predicted)^2) /
+             sum((actual - mean(actual))^2)
   )
 }
 
-# --- Define quarters for cross-validation ---
-quarters <- c("2024-Q1", "2024-Q2", "2024-Q3", "2024-Q4")
+```
 
-# --- Define model list and names ---
-model_list  <- list(model1_ols, model2_lag_ols, model3_nb,
-                    model5_nb, model6_nb)
+```{r define}
 
-model_names <- c("Model1_OLS", "Model2_TimeLag_OLS", "Model3_NB",
-                 "Model5_ST_NB", "Model6_Final")
+#| warning: false
+#| message: false
+#| echo: false
+
+model_list <- list(
+  model1_ols,
+  model2_lag_ols,
+  model3_nb,
+  model5_nb,
+  model6_nb
+)
+
+model_names <- c(
+  "Model1_OLS",
+  "Model2_TimeLag_OLS",
+  "Model3_Poisson",
+  "Model5_ST_Poisson",
+  "Model6_Final"
+)
+
 ```
 
 
-```{r}
+```{r rmse}
+#| warning: false
+#| message: false
+#| echo: true
 cv_results_overall <- map2_dfr(
   model_list, model_names,
   ~{
@@ -1335,7 +1737,10 @@ cv_results_overall
 
 ### RMSE on each quarter
 
-```{r}
+```{r rmse_quarter}
+#| warning: false
+#| message: false
+#| echo: true
 library(purrr)
 
 # --- Performance function  ---
@@ -1401,8 +1806,10 @@ cv_results_df
 
 ### Graphs of RMSE
 
-
-```{r}
+```{r graph}
+#| warning: false
+#| message: false
+#| echo: true
 cv_summary <- cv_results_df %>%
   group_by(model) %>%
   summarise(
@@ -1427,7 +1834,11 @@ ggplot(cv_summary, aes(x = model, y = Value, fill = Metric)) +
     plot.title = element_text(face="bold")
   )
 ```
-```{r}
+
+```{r cv_results}
+#| warning: false
+#| message: false
+#| echo: true
 cv_plot <- cv_results_df %>%
   pivot_longer(cols = c(MAE, RMSE, R2),
                names_to = "Metric", values_to = "Value")
@@ -1447,11 +1858,15 @@ ggplot(cv_plot, aes(x = model, y = Value, fill = model)) +
   )
 
 ```
+
 ## Log-likelihood and Deviance Result
 
 Log-likelihood and deviance are meaningful only within the same model family (only compare NB to NB). In NB family: Model6_NB_loglikelihood = –3518.289 (best); Model6_NB_deviance = 1480.810 (the second lowest), presenting that among NB models, **Model6 achieves the highest log-likelihood, confirming it captures spatial structure better than both the baseline NB and spatially lagged NB.**Model3 got the lowest residual deviance but weaker in predicting spatial factors.
 
-```{r}
+```{r log-like}
+#| warning: false
+#| message: false
+#| echo: true
 library(broom)
 
 models <- list(
@@ -1463,31 +1878,47 @@ models <- list(
   Model6_NB = model6_nb
 )
 
+# Build deviance table
 deviance_table <- purrr::map_dfr(
   models,
-  ~{
-    tibble(
-      model = deparse(substitute(.x)),
+  ~tibble(
       residual_deviance = tryCatch(.x$deviance, error = function(e) NA),
       null_deviance     = tryCatch(.x$null.deviance, error = function(e) NA),
       log_likelihood    = tryCatch(as.numeric(logLik(.x)), error = function(e) NA)
-    )
-  },
-  .id = "model_name"
+  ),
+  .id = "Model"   # <-- This becomes your model name column
 )
 
-deviance_table
+# Styled kable
+deviance_table %>%
+  kable(
+    format = "html",
+    caption = "Model Deviance and Log-Likelihood Comparison",
+    col.names = c("Model", "Residual Deviance", "Null Deviance", "Log-Likelihood"),
+    digits = 3,
+    escape = FALSE
+  ) %>%
+  kable_styling(
+    bootstrap_options = c("striped", "hover", "condensed"),
+    full_width = FALSE
+  )
+
+
 ```
 
 ## Residual Diagnostics for model 6
-- Spatial autocorrelation in residuals
-- Heteroskedasticity checks  
+
+-   Spatial autocorrelation in residuals
+-   Heteroskedasticity checks
 
 ### Spatial Autocorrelation Diagnosis
 
 Almost no meaningful spatial autocorrelation remaining in the residuals. Indicating that Model 6 successfully removes spatial dependence via eigenvector filtering, producing spatially clean residuals. No additional spatial lag or error structure is required.
 
-```{r}
+```{r morans2}
+#| warning: false
+#| message: false
+#| echo: true
 df$resid <- residuals(model6_nb, type = "pearson")
 
 # Moran's I
@@ -1495,7 +1926,11 @@ moran_test <- moran.test(df$resid, lw)
 moran_test
 
 ```
-```{r}
+
+```{r residuals_morans}
+#| warning: false
+#| message: false
+#| echo: true
 library(spdep)
 
 lag_resid <- lag.listw(lw, df$resid)
@@ -1521,7 +1956,10 @@ ggplot(plot_df, aes(x = resid, y = lag_resid)) +
 
 ```
 
-```{r}
+```{r SPATIALRESIDUALS}
+#| warning: false
+#| message: false
+#| echo: true
 library(ggplot2)
 
 df_sf$resid <- residuals(model6_nb, type = "pearson")
@@ -1533,19 +1971,19 @@ ggplot(df_sf) +
     midpoint = 0, name = "Residuals"
   ) +
   theme_minimal(base_size = 13) +
-  theme(
-    legend.position = "right",
-    panel.grid = element_blank()
-  ) +
+mapTheme+
   labs(title = "Spatial Distribution of Model Residuals")
 
 ```
+
 ### Heteroskedasticity Diagnosis
 
 While Model 6 eliminates spatial bias, it still exhibits heteroskedasticity—an inherent feature of count processes rather than a model flaw. This does not compromise interpretability or prediction, but it reinforces why Negative Binomial, rather than OLS or Poisson, is appropriate for this dataset.
 
-
-```{r}
+```{r bp_test}
+#| warning: false
+#| message: false
+#| echo: true
 library(lmtest)
 library(sandwich)
 
@@ -1553,7 +1991,12 @@ bp_test <- bptest(model6_nb)
 bp_test
 
 ```
-```{r}
+
+```{r hetero}
+#| warning: false
+#| message: false
+#| echo: true
+
 df$fit <- fitted(model6_nb)
 
 df_plot <- df %>% filter(fit < 100)
@@ -1571,10 +2014,9 @@ ggplot(df_plot, aes(x = fit, y = resid)) +
 
 ```
 
-
 # Conclusion
 
-This project develops a spatially informed framework for understanding eviction patterns in Philadelphia using integrated administrative, ACS, property, crime, and transit datasets. By testing a series of models—from OLS to temporal, Poisson, and spatial extensions—we find that eviction dynamics are strongly shaped by **both temporal persistence and spatial context**. 
+This project develops a spatially informed framework for understanding eviction patterns in Philadelphia using integrated administrative, ACS, property, crime, and transit datasets. By testing a series of models—from OLS to temporal, Poisson, and spatial extensions—we find that eviction dynamics are strongly shaped by **both temporal persistence and spatial context**.
 
 Among all candidates, **Model 6 (Eigenvector-Filtered Negative Binomial)** offers the strongest overall predictive performance: it accounts for overdispersion in eviction counts, removes residual spatial autocorrelation, and improves out-of-sample accuracy compared to simpler Poisson or lag-only models. This validates our choice of tract-level spatial units and demonstrates appropriate application of spatial and statistical techniques suited for count outcomes.
 
@@ -1584,7 +2026,7 @@ Despite its strong performance, Model 6 is not free from limitations. **Heterosk
 
 ## Policy and Equity Implications
 
-For communities the model predicts poorly, the risks are non-trivial: they may receive insufficient support, delayed interventions, or misaligned enforcement. For applying, the model should be framed as a decision-support tool, not a deterministic forecast—highlighting its strengths in identifying spatial trends while clearly explaining where uncertainty remains. 
+For communities the model predicts poorly, the risks are non-trivial: they may receive insufficient support, delayed interventions, or misaligned enforcement. For applying, the model should be framed as a decision-support tool, not a deterministic forecast—highlighting its strengths in identifying spatial trends while clearly explaining where uncertainty remains.
 
 If deployed uncritically, a system like this could perpetuate structural disadvantages, particularly in historically marginalized neighborhoods. Ethical use therefore requires transparency, regular auditing for disparate impacts, and mechanisms allowing community stakeholders to challenge or contextualize predictions.
 
@@ -1592,12 +2034,4 @@ If deployed uncritically, a system like this could perpetuate structural disadva
 
 The city could use these findings to prioritize proactive outreach, rental assistance targeting, or inspection resource allocation in high-risk tracts. However, safeguards should accompany implementation: periodic retraining with updated data, equity audits, and parallel qualitative assessments to ensure the model augments—not replaces—local knowledge. Clear documentation of data sources, cleaning steps, spatial integration methods, and diagnostic checks is essential for maintaining reproducibility and public trust.
 
-
-
 In summary, this project provides a spatially grounded tool for understanding eviction dynamics, while emphasizing that responsible implementation requires transparency, equity considerations, and a commitment to mitigating potential harms.
-
-
-
-
-
-
