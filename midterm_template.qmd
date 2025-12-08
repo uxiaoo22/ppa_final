@@ -11,18 +11,21 @@ format:
 
 ---
 
+### Introduction
+
+Evictions represent a critical indicator of neighborhood instability and social vulnerability.  
+In this project, our **dependent variable** is **Quarterly eviction total for 2024, aggregated at the census tract level in Philadelphia.**
+
+---
+
 ### Research Question
 
-- What factors (structural, census, spatial etc. ) most significantly impact the predictive accuracy of house price models?
+Our core research question is: **Can we predict quarterly eviction filing counts at the census-tract level 1–3 months (i.e., 1 quarter) in advance, enabling the City of Philadelphia to proactively deploy rental assistance, legal aid resources, and community outreach?**Including basic concepts as follows:
 
-
-**Sub-questions:**
-
-- “Which factors are most influential in determining house price prediction outcomes?”
-
-- “To what extent are house prices predictable, and to what extent are they driven by unobservable factors?”
-
-- “Does the predictive performance of the model remain consistent across neighborhoods of varying wealth levels?”
+- Spatial Unit: Census tract
+- Temporal Unit: Quarterly
+- Outcome: Number of eviction filings per tract per quarter
+- Model: Poisson / Negative Binomial (count outcome), Spatial Model, OLS Model
 
 ---
 
